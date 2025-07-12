@@ -1,0 +1,24 @@
+[project]
+name = "pynlpclassifier"
+version = "0.1.0"
+description = "A PySpark-based NLP pipeline made mainly for spelling correction and classifying free text input data into categories"
+authors = [
+    {name = "Hamza Dev",email = "you@example.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyspark>=3.0.0",
+    "pandas>=1.0.0",
+    "gensim>=4.0.0",
+    "numpy>=1.18.0",
+    "python-Levenshtein>=0.12.0"
+]
+
+[tool.poetry]
+packages = [{include = "pynlpclassifier", from = "src"}]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
