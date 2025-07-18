@@ -1,5 +1,6 @@
 import gensim
 import pandas as pd
+import os
 import Levenshtein
 import numpy as np
 
@@ -9,7 +10,7 @@ import re
 from pyspark.sql.types import StringType, IntegerType, ArrayType
 from pyspark.broadcast import Broadcast
 
-from pyspark.sql import SparkSession
+# from pyspark.sql import SparkSession
 from . import utils as fx
 from pyspark.sql import functions as F
 
@@ -28,12 +29,12 @@ accents_list = [
     ("ñ", "n")
 ]
 
-def train_word2vec_ml(
+def train_ml_model(
     df,
     text_column,
     model_path="trained_model.model",
     test_word = "industrial",
-    window=5,
+    window=7,
     min_count=2,
     workers=4
 ):
@@ -67,24 +68,51 @@ def train_word2vec_ml(
     model.save(model_path)
     
     # Test the model
-    print(model.wv.most_similar(test_word))
+    try:
+        print(model.wv.most_similar(test_word))
+    except KeyError:
+        print(f"⚠️ The word '{test_word}' is not in the model vocabulary.")
 
 
 """ spark functions """
 def run_classification_model(
-    df,
-    master_categories,
+    df_input,
+    master_df_input,
     categories_column,
     main_text_column,
     id_column_df,
     id_column_categories,
     model_path,
-    stopwords = stopwords_list,
-    accents = accents_list,
-    ratio_speciality = 0.75,
-    match_score = 2
+    stopwords,
+    accents,
+    confidence_ratio = 0.8,
+    match_score = 2,
+    include_matched_words = 0
 ):
-    spark = SparkSession.builder.appName("NLP app").getOrCreate()
+    
+    # if no stopwords or accents lists were provided
+    if stopwords == 0:
+        stopwords = []
+    elif stopwords == 1:
+        stopwords = stopwords_list
+    else:
+        stopwords
+    
+    if accents == 0:
+        accents = []
+    elif accents == 1:
+        accents = accents_list
+    else:
+        accents
+
+    # spark = SparkSession.builder.appName("NLP app").getOrCreate()
+    # spark = spark_session
+
+    # df = spark.createDataFrame(df_input)
+    # master_categories = spark.createDataFrame(master_df_input)
+
+    df = df_input
+    master_categories = master_df_input
 
     # COLS_RENAME_TARGET_TYPES = {
     #     ('model_sources', 'model_source_specialities'),
@@ -127,12 +155,11 @@ def run_classification_model(
         stopwords,
         accents,
         model_path,
-        ratio_speciality,
+        confidence_ratio,
         "|"
     )
 
-    df = df.drop(main_text_column, "original_tokens_matched").withColumnRenamed('name_corrected', main_text_column
-    ).withColumnRenamed('model_sources', 'model_source_specialities').withColumnRenamed('matched_words', 'matched_speciality')
+    df = df.drop("original_tokens_matched").withColumnRenamed('name_corrected',f"{main_text_column}_corrected").withColumnRenamed('matched_words','corrected_words')
 
     # Cast ID
     df = df.withColumn(
@@ -150,14 +177,11 @@ def run_classification_model(
         df,
         master_categories,
         match_score,
-        main_text_column,
+        f"{main_text_column}_corrected",
         categories_column,
         id_column_df,
-        id_column_categories
+        id_column_categories,
+        include_matched_words
     )
-
-    # Optional: format arrays as strings
-    df = df.withColumn("df_tokens", F.concat(F.lit("['"), F.concat_ws("','", F.col("df_tokens")), F.lit("']")))
-    df = df.withColumn("categories_tokens", F.concat(F.lit("['"), F.concat_ws("','", F.col("master_tokens")), F.lit("']")))
 
     return df
