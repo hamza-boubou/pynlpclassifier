@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 setup(
     name="PyNLPclassifier",
-    version="1.0.1",
+    version="1.0.2",
     author="Hamza Dev",
     author_email="you@example.com",
     description="A PySpark-based NLP pipeline for spelling correction and text classification",
