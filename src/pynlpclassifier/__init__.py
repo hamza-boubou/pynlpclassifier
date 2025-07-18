@@ -1,2 +1,2 @@
-from .core import train_word2vec_ml, run_classification_model
+from .core import train_ml_model, run_classification_model
 from . import utils
