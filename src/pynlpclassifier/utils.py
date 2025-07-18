@@ -1,9 +1,10 @@
 import gensim
 import pandas as pd
+import os
 import Levenshtein
 import numpy as np
 
-from pyspark.sql import SparkSession
+# from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql import Window
 from functools import reduce
@@ -352,7 +353,8 @@ def degree_clasification(
     main_text_column,
     categories_column,
     id_column_df,
-    id_column_categories
+    id_column_categories,
+    include_matching_words 
 ):
     """
     Classifies degrees by intersecting tokens from matched_speciality and master_degree_name.
@@ -372,28 +374,32 @@ def degree_clasification(
     # 1. Prepare matched_speciality column: replace '|' with space and convert to lowercase
     # This prepares the string for tokenization.
     df_prepared = df.withColumn(
-        "matched_speciality_cleaned",
-        F.lower(F.regexp_replace(F.col("matched_speciality"), "\\|", " "))
+        "matched_words_cleaned",
+        F.lower(F.regexp_replace(F.col(main_text_column), "\\|", " "))
     )
 
     # 2. Tokenizing degree_name from master_degrees and matched_speciality from df
     # Split the cleaned strings into arrays of words (tokens).
     df_with_tokens = df_prepared.withColumn(
-        "df_tokens",
-        F.split(F.col("matched_speciality_cleaned"), " ")
-    )
+            "df_tokens",
+            F.split(F.col("matched_words_cleaned"), " ")
+        )
 
-    master_degrees_with_tokens = master_degrees.withColumn(
-        "master_tokens",
-        F.split(F.lower(F.col(categories_column)), " ") # Assuming 'degree_name' is the column for master degree names
-    ).withColumnRenamed(id_column_categories,'master_category_id')
+    master_degrees_with_tokens = master_degrees.withColumnRenamed(
+            categories_column, f'{categories_column}_category'
+        ).withColumn(
+            "master_tokens",
+            F.split(F.lower(F.col(f'{categories_column}_category')), " ") # Assuming 'degree_name' is the column for master degree names
+        ).withColumnRenamed(id_column_categories,'master_category_id')
+        
+    master_degrees_with_tokens.columns
 
-    # 3. Cross join the tables
-    # This creates all possible pairs between records in df and master_degrees.
+        # 3. Cross join the tables
+        # This creates all possible pairs between records in df and master_degrees.
     df_cross_joined = df_with_tokens.crossJoin(master_degrees_with_tokens)
 
-    # 4. Calculate match score by intersecting the token arrays
-    # The match score is the count of common tokens between the education and master degree descriptions.
+        # 4. Calculate match score by intersecting the token arrays
+        # The match score is the count of common tokens between the education and master degree descriptions.
     df_score = df_cross_joined.withColumn(
         "match_score",
         F.size(
@@ -408,16 +414,29 @@ def degree_clasification(
     window_spec = Window.partitionBy(id_column_df).orderBy(F.col("match_score").desc())
 
     df_rank = df_score.withColumn(
-        "rank",
-        F.row_number().over(window_spec)
+            "rank",
+            F.row_number().over(window_spec)
+        )
+
+        # 6. Pick rows with rank 1 (the best match)
+    df = df_rank.filter(
+            (F.col('rank') == 1)
+            | (F.col('rank').isNull())
     )
 
-    # 6. Pick rows with rank 1 (the best match)
-    best_matches_df = df_rank.filter(
-        (F.col('rank') == 1)
-        | (F.col('rank').isNull())
-    )
+    df = df.withColumn(
+        f'{categories_column}_category',
+        F.when(F.col('match_score') < score, F.lit(None)
+        ).otherwise(F.col(f'{categories_column}_category'))
+    ).drop('rank','matched_words_cleaned')
 
-    best_matches_df = best_matches_df.filter(F.col('match_score') > score)
+    # Apply the logic for 'convert_df_tokens'
+    if include_matching_words == 1:
+        df = df.withColumn(f"{main_text_column}_matched_words", F.concat(F.lit("['"), F.concat_ws("','", F.col("df_tokens")), F.lit("']")))
+        df = df.withColumn(f'{categories_column}_category_matched_words', F.concat(F.lit("['"), F.concat_ws("','", F.col("master_tokens")), F.lit("']")))
+    elif include_matching_words == 0:
+        df = df.drop('df_tokens','master_tokens')
+    else:
+        df = df.drop('df_tokens','master_tokens')
 
-    return best_matches_df
+    return df
